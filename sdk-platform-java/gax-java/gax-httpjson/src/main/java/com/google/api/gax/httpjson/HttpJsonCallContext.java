@@ -82,6 +82,7 @@ public final class HttpJsonCallContext implements ApiCallContext {
   private final @Nullable RetrySettings retrySettings;
   private final @Nullable ImmutableSet<StatusCode.Code> retryableCodes;
   private final EndpointContext endpointContext;
+  @Nullable private final TransportChannel transportChannel;
 
   /** Returns an empty instance. */
   public static HttpJsonCallContext createDefault() {
@@ -93,6 +94,7 @@ public final class HttpJsonCallContext implements ApiCallContext {
         null,
         ImmutableMap.of(),
         ApiCallContextOptions.getDefaultOptions(),
+        null,
         null,
         null,
         null,
@@ -111,6 +113,7 @@ public final class HttpJsonCallContext implements ApiCallContext {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -125,7 +128,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
       @Nullable ApiTracer tracer,
       @Nullable RetrySettings defaultRetrySettings,
       @Nullable Set<StatusCode.Code> defaultRetryableCodes,
-      @Nullable EndpointContext endpointContext) {
+      @Nullable EndpointContext endpointContext,
+      @Nullable TransportChannel transportChannel) {
     this.channel = channel;
     this.callOptions = callOptions;
     this.timeout = timeout;
@@ -141,6 +145,7 @@ public final class HttpJsonCallContext implements ApiCallContext {
     // a valid EndpointContext with user configurations after the client has been initialized.
     this.endpointContext =
         endpointContext == null ? EndpointContext.getDefaultInstance() : endpointContext;
+    this.transportChannel = transportChannel;
   }
 
   /**
@@ -233,7 +238,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         newTracer,
         newRetrySettings,
         newRetryableCodes,
-        endpointContext);
+        endpointContext,
+        this.transportChannel);
   }
 
   @Override
@@ -251,7 +257,24 @@ public final class HttpJsonCallContext implements ApiCallContext {
           "Expected HttpJsonTransportChannel, got " + inputChannel.getClass().getName());
     }
     HttpJsonTransportChannel transportChannel = (HttpJsonTransportChannel) inputChannel;
-    return withChannel(transportChannel.getChannel());
+    return new HttpJsonCallContext(
+        transportChannel.getChannel(),
+        this.callOptions,
+        this.timeout,
+        this.streamWaitTimeout,
+        this.streamIdleTimeout,
+        this.extraHeaders,
+        this.options,
+        this.tracer,
+        this.retrySettings,
+        this.retryableCodes,
+        this.endpointContext,
+        transportChannel);
+  }
+
+  @Override
+  public TransportChannel getTransportChannel() {
+    return transportChannel;
   }
 
   /** This method is obsolete. Use {@link #withTimeoutDuration(java.time.Duration)} instead. */
@@ -275,7 +298,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        endpointContext);
+        endpointContext,
+        this.transportChannel);
   }
 
   @Override
@@ -301,7 +325,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   /** This method is obsolete. Use {@link #getTimeoutDuration()} instead. */
@@ -346,7 +371,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   /** This method is obsolete. Use {@link #getStreamWaitTimeoutDuration()} instead. */
@@ -396,7 +422,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   /** This method is obsolete. Use {@link #getStreamIdleTimeoutDuration()} instead. */
@@ -433,7 +460,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   @BetaApi("The surface for extra headers is not stable yet and may change in the future.")
@@ -457,7 +485,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   /** {@inheritDoc} */
@@ -527,7 +556,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   @Override
@@ -548,7 +578,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   public HttpJsonCallContext withChannel(@Nullable HttpJsonChannel newChannel) {
@@ -563,7 +594,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   public HttpJsonCallContext withCallOptions(HttpJsonCallOptions newCallOptions) {
@@ -578,7 +610,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         this.tracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   @Deprecated
@@ -614,7 +647,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         newTracer,
         this.retrySettings,
         this.retryableCodes,
-        this.endpointContext);
+        this.endpointContext,
+        this.transportChannel);
   }
 
   @Override
@@ -634,7 +668,8 @@ public final class HttpJsonCallContext implements ApiCallContext {
         && Objects.equals(this.tracer, that.tracer)
         && Objects.equals(this.retrySettings, that.retrySettings)
         && Objects.equals(this.retryableCodes, that.retryableCodes)
-        && Objects.equals(this.endpointContext, that.endpointContext);
+        && Objects.equals(this.endpointContext, that.endpointContext)
+        && Objects.equals(this.transportChannel, that.transportChannel);
   }
 
   @Override
@@ -648,6 +683,7 @@ public final class HttpJsonCallContext implements ApiCallContext {
         tracer,
         retrySettings,
         retryableCodes,
-        endpointContext);
+        endpointContext,
+        transportChannel);
   }
 }

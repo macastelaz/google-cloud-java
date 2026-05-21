@@ -88,6 +88,8 @@ public class ManagedHttpJsonChannel implements HttpJsonChannel, BackgroundResour
         deadlineScheduledExecutorService);
   }
 
+  public void refresh() {}
+
   @VisibleForTesting
   Executor getExecutor() {
     return executor;

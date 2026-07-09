@@ -1178,10 +1178,17 @@ class ComputeEngineCredentialsTest extends BaseSerializationTest {
   }
 
   @Test
-  void isOnGce_forbidden_doesNotRetry() {
+  void isOnGce_clientError_doesNotRetry_returnsFalseOnUnknownOs() {
     MockMetadataServerTransportFactory transportFactory = new MockMetadataServerTransportFactory();
-    transportFactory.transport.setStatusCode(HttpStatusCodes.STATUS_CODE_FORBIDDEN);
+    transportFactory.transport.setStatusCode(HttpStatusCodes.STATUS_CODE_NOT_FOUND);
     DefaultCredentialsProvider provider = new DefaultCredentialsProvider() {
+      @Override
+      String getEnv(String name) {
+        if (DefaultCredentialsProvider.NO_GCE_CHECK_ENV_VAR.equals(name)) {
+          return "false";
+        }
+        return super.getEnv(name);
+      }
       @Override
       String getOsName() {
         return "Unknown";
@@ -1189,6 +1196,32 @@ class ComputeEngineCredentialsTest extends BaseSerializationTest {
     };
     boolean isOnGce = ComputeEngineCredentials.isOnGce(transportFactory, provider);
     assertFalse(isOnGce);
+    assertEquals(1, transportFactory.transport.getRequestCount());
+  }
+
+  @Test
+  void isOnGce_clientError_doesNotRetry_returnsTrueOnLinuxGce() {
+    MockMetadataServerTransportFactory transportFactory = new MockMetadataServerTransportFactory();
+    transportFactory.transport.setStatusCode(HttpStatusCodes.STATUS_CODE_FORBIDDEN);
+    DefaultCredentialsProvider provider = new DefaultCredentialsProvider() {
+      @Override
+      String getEnv(String name) {
+        if (DefaultCredentialsProvider.NO_GCE_CHECK_ENV_VAR.equals(name)) {
+          return "false";
+        }
+        return super.getEnv(name);
+      }
+      @Override
+      String getOsName() {
+        return "Linux";
+      }
+      @Override
+      java.io.InputStream readStream(java.io.File file) throws java.io.FileNotFoundException {
+        return new java.io.ByteArrayInputStream("Google Compute Engine".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      }
+    };
+    boolean isOnGce = ComputeEngineCredentials.isOnGce(transportFactory, provider);
+    assertTrue(isOnGce);
     assertEquals(1, transportFactory.transport.getRequestCount());
   }
 

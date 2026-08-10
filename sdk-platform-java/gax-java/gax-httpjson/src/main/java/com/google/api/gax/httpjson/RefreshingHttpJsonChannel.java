@@ -35,6 +35,7 @@ import com.google.api.gax.httpjson.ForwardingHttpJsonClientCall.SimpleForwarding
 import com.google.api.gax.httpjson.ForwardingHttpJsonClientCallListener.SimpleForwardingHttpJsonClientCallListener;
 import com.google.api.gax.rpc.mtls.WorkloadCertificateUtils;
 import com.google.common.annotations.VisibleForTesting;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,6 +43,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An implementation of {@link ManagedHttpJsonChannel} that supports dynamic mTLS certificate
@@ -240,10 +242,16 @@ public class RefreshingHttpJsonChannel extends ManagedHttpJsonChannel {
     synchronized (refreshLock) {
       isShuttingDown = true;
       for (ChannelEntry entry : allEntries) {
-        entry.requestShutdown();
+        entry.shutdownRequested.set(true);
+        entry.shutdownInitiated.set(true);
         entry.channel.shutdownNow();
       }
     }
+  }
+
+  @VisibleForTesting
+  void invalidateDiskFingerprintCache() {
+    this.lastDiskCheck = null;
   }
 
   @Override
@@ -329,9 +337,11 @@ public class RefreshingHttpJsonChannel extends ManagedHttpJsonChannel {
   private static class ReleasingHttpJsonClientCall<ReqT, RespT>
       extends SimpleForwardingHttpJsonClientCall<ReqT, RespT> {
 
+    private @Nullable CancellationException cancellationException;
     private final ChannelEntry entry;
     private final AtomicBoolean wasClosed = new AtomicBoolean(false);
     private final AtomicBoolean wasReleased = new AtomicBoolean(false);
+    private final AtomicBoolean wasStarted = new AtomicBoolean(false);
 
     ReleasingHttpJsonClientCall(HttpJsonClientCall<ReqT, RespT> delegate, ChannelEntry entry) {
       super(delegate);
@@ -340,6 +350,13 @@ public class RefreshingHttpJsonChannel extends ManagedHttpJsonChannel {
 
     @Override
     public void start(Listener<RespT> responseListener, HttpJsonMetadata requestHeaders) {
+      wasStarted.set(true);
+      if (cancellationException != null) {
+        if (wasReleased.compareAndSet(false, true)) {
+          entry.release();
+        }
+        throw new IllegalStateException("Call is already cancelled", cancellationException);
+      }
       try {
         super.start(
             new SimpleForwardingHttpJsonClientCallListener<RespT>(responseListener) {
@@ -363,6 +380,15 @@ public class RefreshingHttpJsonChannel extends ManagedHttpJsonChannel {
           entry.release();
         }
         throw e;
+      }
+    }
+
+    @Override
+    public void cancel(@Nullable String message, @Nullable Throwable cause) {
+      this.cancellationException = new CancellationException(message);
+      super.cancel(message, cause);
+      if (!wasStarted.get() && wasReleased.compareAndSet(false, true)) {
+        entry.release();
       }
     }
   }

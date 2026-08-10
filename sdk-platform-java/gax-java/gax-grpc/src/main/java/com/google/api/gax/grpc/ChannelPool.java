@@ -485,6 +485,11 @@ class ChannelPool extends ManagedChannel {
     }
   }
 
+  @VisibleForTesting
+  void invalidateDiskFingerprintCache() {
+    this.lastDiskCheck = null;
+  }
+
   boolean shouldRefresh() {
     if (workloadCertPath == null) {
       return false;
@@ -513,6 +518,7 @@ class ChannelPool extends ManagedChannel {
     //   replaces the list)
     synchronized (entryWriteLock) {
       if (workloadCertPath == null) {
+        refreshAll();
         return;
       }
       String currentDiskFingerprint = getOrUpdateDiskFingerprint(workloadCertPath);
@@ -721,15 +727,16 @@ class ChannelPool extends ManagedChannel {
   /**
    * ClientCall wrapper that makes sure to decrement the outstanding RPC count on completion.
    *
-   * <p>Contract: Exactly one call to {@link #start(Listener, Metadata)} or explicit release via
-   * {@link #cancel(String, Throwable)} is required to balance reference counts. Early cancellation
-   * before {@code start()} safely decrements the reference count via atomic compare-and-set.
+   * <p>Contract: Exactly one call to {@link #start(Listener, Metadata)} is required to balance
+   * reference counts. Early cancellation before {@code start()} is recorded and safely decrements
+   * the reference count when {@code start()} is subsequently invoked.
    */
   static class ReleasingClientCall<ReqT, RespT> extends SimpleForwardingClientCall<ReqT, RespT> {
     private @Nullable CancellationException cancellationException;
     final Entry entry;
     private final AtomicBoolean wasClosed = new AtomicBoolean();
     private final AtomicBoolean wasReleased = new AtomicBoolean();
+    private final AtomicBoolean wasStarted = new AtomicBoolean();
 
     public ReleasingClientCall(ClientCall<ReqT, RespT> delegate, Entry entry) {
       super(delegate);
@@ -738,6 +745,7 @@ class ChannelPool extends ManagedChannel {
 
     @Override
     public void start(Listener<RespT> responseListener, Metadata headers) {
+      wasStarted.set(true);
       if (cancellationException != null) {
         if (wasReleased.compareAndSet(false, true)) {
           entry.release();
@@ -788,7 +796,12 @@ class ChannelPool extends ManagedChannel {
     @Override
     public void cancel(@Nullable String message, @Nullable Throwable cause) {
       this.cancellationException = new CancellationException(message);
-      super.cancel(message, cause);
+      if (delegate() != null) {
+        super.cancel(message, cause);
+      }
+      if (!wasStarted.get() && wasReleased.compareAndSet(false, true)) {
+        entry.release();
+      }
     }
   }
 }

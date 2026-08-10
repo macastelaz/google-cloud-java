@@ -438,6 +438,24 @@ class ChannelPoolTest {
   }
 
   @Test
+  void testCancelBeforeStartReleasesChannelEntry() throws IOException {
+    ManagedChannel underlyingChannel = mock(ManagedChannel.class);
+    ManagedChannel replacementChannel = mock(ManagedChannel.class);
+    FakeChannelFactory channelFactory =
+        new FakeChannelFactory(ImmutableList.of(underlyingChannel, replacementChannel));
+    pool = ChannelPool.create(ChannelPoolSettings.staticallySized(1), channelFactory, null, null);
+
+    ClientCall<String, Integer> call =
+        pool.newCall(FakeMethodDescriptor.create(), CallOptions.DEFAULT);
+
+    pool.refreshAll();
+    Mockito.verify(underlyingChannel, Mockito.never()).shutdown();
+
+    call.cancel("Cancelled early", null);
+    Mockito.verify(underlyingChannel, Mockito.times(1)).shutdown();
+  }
+
+  @Test
   void channelReactiveMTlsRefreshShouldConditionallySwapChannels()
       throws IOException, InterruptedException {
     ManagedChannel underlyingChannel1 = Mockito.mock(ManagedChannel.class);
@@ -473,7 +491,7 @@ class ChannelPoolTest {
         .newCall(Mockito.<MethodDescriptor<String, Integer>>any(), Mockito.any(CallOptions.class));
 
     // The ChannelPool caches fingerprints for 1000ms, wait for it to expire
-    Thread.sleep(1100);
+    pool.invalidateDiskFingerprintCache();
 
     java.nio.file.Path rootCert =
         java.nio.file.Paths.get("src", "test", "resources", "root_cert.pem");
@@ -525,6 +543,37 @@ class ChannelPoolTest {
 
     pool.newCall(FakeMethodDescriptor.<String, Integer>create(), CallOptions.DEFAULT);
 
+    Mockito.verify(underlyingChannel2, Mockito.only())
+        .newCall(Mockito.<MethodDescriptor<String, Integer>>any(), Mockito.any(CallOptions.class));
+  }
+
+  @Test
+  void testRefreshWithNullWorkloadCertPathSwapsChannel() throws IOException {
+    ScheduledExecutorService executor =
+        Mockito.mock(ScheduledExecutorService.class, Mockito.withSettings().withoutAnnotations());
+    FixedExecutorProvider provider = FixedExecutorProvider.create(executor);
+    ManagedChannel underlyingChannel1 = Mockito.mock(ManagedChannel.class);
+    ManagedChannel underlyingChannel2 = Mockito.mock(ManagedChannel.class);
+    FakeChannelFactory channelFactory =
+        new FakeChannelFactory(ImmutableList.of(underlyingChannel1, underlyingChannel2));
+    pool =
+        new ChannelPool(
+            ChannelPoolSettings.staticallySized(1).toBuilder()
+                .setPreemptiveRefreshEnabled(true)
+                .build(),
+            channelFactory,
+            provider,
+            null);
+    Mockito.reset(underlyingChannel1);
+
+    pool.newCall(FakeMethodDescriptor.<String, Integer>create(), CallOptions.DEFAULT);
+    Mockito.verify(underlyingChannel1, Mockito.only())
+        .newCall(Mockito.<MethodDescriptor<String, Integer>>any(), Mockito.any(CallOptions.class));
+
+    // Calling refresh() when workloadCertPath is null should fall back to refreshAll()
+    pool.refresh();
+
+    pool.newCall(FakeMethodDescriptor.<String, Integer>create(), CallOptions.DEFAULT);
     Mockito.verify(underlyingChannel2, Mockito.only())
         .newCall(Mockito.<MethodDescriptor<String, Integer>>any(), Mockito.any(CallOptions.class));
   }
